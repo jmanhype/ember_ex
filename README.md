@@ -1,240 +1,97 @@
 # EmberEx
 
-EmberEx is an Elixir port of the [Ember framework](https://github.com/pyember/ember), providing a functional programming approach to building AI applications with language models. It focuses on composition, reusability, and performance optimization for AI workflows.
+Elixir port of the [Ember framework](https://github.com/pyember/ember) for building AI application pipelines with language models.
 
-## Architecture
+## Status
 
-EmberEx is built around several key architectural components:
+Experimental. The operator system, model providers, and JIT optimization layer compile and have tests, but there are no releases and no published hex package.
 
-1. **Operator System**: The fundamental computational unit in EmberEx, implementing a functional programming approach with strong typing, validation, and composition patterns.
-2. **Model System**: A clean interface for interacting with language models from various providers, supporting multiple invocation patterns.
-3. **Specification Pattern**: Separates input/output contracts from implementation logic.
-4. **XCS (Execution Engine)**: Provides graph-based execution with parallelization capabilities.
-5. **JIT Optimization System**: Just-In-Time compilation and optimization for operators, with specialized strategies for language model operations.
+| Area | State |
+|---|---|
+| Operator system | Implemented: map, sequence, parallel, branch, ensemble, retry, LLM, verifier, selector/synthesis judge |
+| Model providers | OpenAI provider implemented; other providers not yet |
+| JIT optimization | 5 strategies: trace, structural, enhanced, LLM-specialized, stochastic |
+| Specification/schema | Ecto-based input/output contracts |
+| XCS execution engine | Graph-based with 4 schedulers (sequential, parallel, topological, wave) |
+| Tests | 5 test files under `test/` |
+| CI | No workflow files |
+| Hex package | Not published |
 
-## Installation
+## What it does
 
-Add EmberEx to your list of dependencies in `mix.exs`:
+Provides composable operators for AI workflows:
 
-```elixir
-def deps do
-  [
-    {:ember_ex, "~> 0.1.0"}
-  ]
-end
-```
-
-## Usage
-
-### Basic Example
+1. Define operators (map, LLM call, branch, ensemble, etc.)
+2. Compose them into sequences, parallel groups, or DAGs
+3. Execute through the XCS engine with automatic scheduling
+4. Optionally apply JIT optimization to operator chains
 
 ```elixir
-# Create a simple operator that uppercases text
-uppercase_op = EmberEx.Operators.MapOperator.new(&String.upcase/1, :text, :uppercase_text)
+# Create and compose operators
+translate = EmberEx.Operators.LLMOperator.new("gpt-4o", "Translate to French: {input}", :text, :french)
+uppercase = EmberEx.Operators.MapOperator.new(&String.upcase/1, :french, :result)
+pipeline  = EmberEx.Operators.SequenceOperator.new([translate, uppercase])
 
-# Call the operator with inputs
-result = EmberEx.Operators.Operator.call(uppercase_op, %{text: "hello world"})
-# => %{uppercase_text: "HELLO WORLD"}
+result = EmberEx.Operators.Operator.call(pipeline, %{text: "Hello"})
 ```
 
-### Language Model Example
+### JIT optimization
 
 ```elixir
-# Create an LLM operator
-llm_op = EmberEx.Operators.LLMOperator.new(
-  "gpt-4o",
-  "Translate the following text to French: {input}",
-  :text,
-  :french_text
-)
-
-# Call the operator with inputs
-result = EmberEx.Operators.Operator.call(llm_op, %{text: "Hello, world!"})
-# => %{french_text: "Bonjour, monde!"}
+optimized = EmberEx.XCS.JIT.Core.jit(operator, mode: :llm)
 ```
 
-### Composing Operators
+Modes: `:trace`, `:structural`, `:enhanced`, `:llm`. The LLM mode separates deterministic pre/post-processing from stochastic LLM calls and caches the deterministic parts.
 
-```elixir
-# Create multiple operators
-translate_op = EmberEx.Operators.LLMOperator.new(
-  "gpt-4o",
-  "Translate the following text to French: {input}",
-  :text,
-  :french_text
-)
+## Stack
 
-uppercase_op = EmberEx.Operators.MapOperator.new(&String.upcase/1, :french_text, :uppercase_french)
+| Dependency | Version |
+|---|---|
+| Elixir | ~> 1.14 |
+| Ecto | ~> 3.10 |
+| Finch | ~> 0.16 |
+| HTTPoison | ~> 2.1 |
+| instructor_ex | git (github) |
+| Jason | ~> 1.4 |
 
-# Compose them in sequence
-sequence_op = EmberEx.Operators.SequenceOperator.new([translate_op, uppercase_op])
+## Repository layout
 
-# Call the sequence
-result = EmberEx.Operators.Operator.call(sequence_op, %{text: "Hello, world!"})
-# => %{text: "Hello, world!", french_text: "Bonjour, monde!", uppercase_french: "BONJOUR, MONDE!"}
+```
+lib/ember_ex/
+  operators/        13 operator modules
+  models/           Provider abstraction, OpenAI provider, usage tracking
+  specifications/   Ecto-based schema generator, specification pattern
+  xcs/              Execution engine, graph, 4 schedulers
+  xcs/jit/          JIT core, cache, profiler, 5 strategy modules
+  examples/         7 example modules (assistant, RAG, ensemble, etc.)
+  metrics/          Collector and storage
+  context/          Execution context
+scripts/            Benchmark and test scripts
+test/               5 test modules
 ```
 
-### Parallel Execution
+117 files total.
 
-```elixir
-# Create multiple operators
-translate_to_french = EmberEx.Operators.LLMOperator.new(
-  "gpt-4o",
-  "Translate the following text to French: {input}",
-  :text,
-  :french_text
-)
-
-translate_to_spanish = EmberEx.Operators.LLMOperator.new(
-  "gpt-4o",
-  "Translate the following text to Spanish: {input}",
-  :text,
-  :spanish_text
-)
-
-# Execute them in parallel
-parallel_op = EmberEx.Operators.ParallelOperator.new([translate_to_french, translate_to_spanish])
-
-# Call the parallel operator
-result = EmberEx.Operators.Operator.call(parallel_op, %{text: "Hello, world!"})
-# => %{text: "Hello, world!", french_text: "Bonjour, monde!", spanish_text: "¡Hola, mundo!"}
-```
-
-### Graph-based Execution
-
-```elixir
-# Define a graph of operators
-graph = %{
-  "translate_to_french" => %{
-    operator: EmberEx.Operators.LLMOperator.new(
-      "gpt-4o",
-      "Translate the following text to French: {input}",
-      :text,
-      :french_text
-    ),
-    inputs: %{text: "text"},
-    dependencies: []
-  },
-  "uppercase_french" => %{
-    operator: EmberEx.Operators.MapOperator.new(&String.upcase/1, :french_text, :uppercase_french),
-    inputs: %{french_text: "translate_to_french.french_text"},
-    dependencies: ["translate_to_french"]
-  }
-}
-
-# Execute the graph
-result = EmberEx.XCS.ExecutionEngine.execute(graph, %{text: "Hello, world!"})
-# => %{
-#      "text" => "Hello, world!",
-#      "translate_to_french.french_text" => "Bonjour, monde!",
-#      "uppercase_french.uppercase_french" => "BONJOUR, MONDE!"
-#    }
-```
-
-## JIT Optimization System
-
-EmberEx features a sophisticated Just-In-Time (JIT) optimization system that automatically improves the performance of operator chains:
-
-### Optimization Strategies
-
-- **Trace-based JIT**: Analyzes execution patterns to optimize frequently used paths
-- **Structural JIT**: Optimizes operators based on their structure without requiring execution
-- **Enhanced JIT**: Combines structural and trace-based approaches for maximum performance
-- **LLM-specialized JIT**: Optimizes language model operations with special attention to:
-  - Function composition optimization (pre/post-processing around LLM calls)
-  - Partial caching of deterministic components with intelligent signature-based keys
-  - Preservation of stochastic behavior where needed through content-aware detection
-  - Parallel processing with adaptive batch sizing and similarity grouping
-
-### Usage Example
-
-```elixir
-# Optimize an operator using the JIT system
-optimized_op = EmberEx.XCS.JIT.Core.jit(complex_operator)
-
-# Optimize with LLM-specific strategy
-llm_optimized_op = EmberEx.XCS.JIT.Core.jit(
-  llm_operator,
-  mode: :llm,
-  optimize_prompt: true,
-  optimize_postprocess: true,
-  preserve_llm_call: true
-)
-
-# Run the optimized operator
-result = EmberEx.Operators.Operator.call(optimized_op, inputs)
-```
-
-## Benefits of the Elixir Port
-
-- **Concurrency and Scalability**: Elixir's BEAM VM provides lightweight processes that can handle millions of concurrent operations efficiently.
-- **Fault Tolerance**: Elixir's "let it crash" philosophy and supervisor trees make EmberEx more resilient.
-- **Low Latency**: Elixir's soft real-time capabilities reduce response times for operations.
-- **Distributed Computing**: Elixir's distributed nature allows EmberEx to easily scale across multiple nodes.
-- **Hot Code Swapping**: The ability to update code without stopping the system is valuable for long-running AI services.
-- **JIT Optimization**: Automatic performance improvements for operator chains, with special handling for LLM operations.
-
-## Development
-
-### Prerequisites
-
-- Elixir 1.14 or later
-- Erlang/OTP 25 or later
-
-### Setup
+## Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/ember_ex.git
+git clone https://github.com/jmanhype/ember_ex.git
 cd ember_ex
-
-# Install dependencies
 mix deps.get
-
-# Run tests
 mix test
 ```
 
-## Advanced Features
+Requires an `OPENAI_API_KEY` environment variable for any operator that calls a language model.
 
-### Recent Enhancements
+## Limitations
 
-**April 2025 Updates**:
-
-- **Execution Engine Enhancement**: Improved handling of specialized LLM graphs that preserves stochastic operations while optimizing surrounding deterministic functions
-- **Analysis Overhead Reduction**: Profiling infrastructure to identify and minimize computational costs during optimization phases
-- **Intelligent Partial Caching**: Smart caching strategies that identify cacheable components based on determinism analysis
-- **Real-world LLM Patterns**: Enhanced detection of prompt templates, result parsers, and actual LLM operations in complex pipelines
-- **Adaptive Batch Processing**: Dynamic batch sizing that balances parallelism with overhead costs
-
-### Benchmarking
-
-EmberEx includes comprehensive benchmarking tools to measure and compare the performance of different JIT optimization strategies. Example benchmark scripts are located in the `scripts/` directory:
-
-```bash
-# Run basic JIT benchmark
-mix run scripts/jit_benchmark_example.exs
-
-# Run LLM-focused benchmark
-mix run scripts/llm_jit_benchmark.exs
-
-# Run specialized LLM optimization benchmark
-mix run scripts/llm_specialized_benchmark.exs
-
-# Test with real-world LLM patterns
-mix run scripts/real_world_llm_benchmark.exs
-```
-
-### Metrics and Monitoring
-
-The framework includes built-in metrics collection and Prometheus integration for monitoring:
-
-```elixir
-# Get JIT cache statistics
-EmberEx.XCS.JIT.Cache.get_stats()
-# => %{hits: 350, misses: 42, hit_rate: 89.3, total_calls: 392}
-```
+- Only the OpenAI provider is implemented. No Anthropic, Google, or local model support.
+- The `instructor_ex` dependency is pinned to a git branch, not a hex release.
+- No CI pipeline or automated test runs.
+- No hex package published; install via git only.
+- 5 test files cover operators and context; no tests for JIT, XCS engine, or model providers.
+- No license file in the repository.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Not specified.
